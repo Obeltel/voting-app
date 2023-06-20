@@ -1,116 +1,60 @@
-#!/usr/bin/env python3
-
+from flask import Flask, render_template, request, make_response, g
 from redis import Redis
 import os
-import time
-import psycopg2
+import platform
+import socket
+import random
 import json
 
+# This is a comment
+
+option_a = os.getenv('OPTION_A', "Nodejs")
+option_b = os.getenv('OPTION_B', "Python")
+hostname = socket.gethostname()
+proc = platform.processor()
+
+# may have to have env variable for Z
+
+app = Flask(__name__)
+
+
 def get_redis():
-   redishost = os.environ.get('REDIS_HOST', 'new-redis')
-   redispassword = os.environ.get('REDIS_PASSWORD', 'password')
-   print ("Connecting to Redis using " + redishost)
-   #redis_conn = Redis(host=redishost, db=0, socket_timeout=5)
-   redis_conn = Redis(host=redishost, db=0, socket_timeout=5, password=redispassword)
-   redis_conn.ping()
-   print ("connected to redis!") 
-   return redis_conn
+    if not hasattr(g, 'redis'):
+        redishost = os.environ.get('REDIS_HOST', 'new-redis')
+        redispassword = os.environ.get('REDIS_PASSWORD', 'admin')
+        print("Connecting to Redis using " + redishost)
+        g.redis = Redis(host=redishost, db=0, socket_timeout=5, password=redispassword)
+        print(g.redis.ping())
 
-def connect_postgres(): 
-   host = os.getenv('POSTGRES_SERVICE_HOST', "new-postgresql")
-   db_name = os.getenv('DB_NAME', "db") 
-   db_user = os.getenv('DB_USER', "admin") 
-   db_pass = os.getenv('DB_PASS', "admin") 
-   try:
-      print ("connecting to the DB") 
-      conn = psycopg2.connect ("host={} dbname={} user={} password={}".format(host, db_name, db_user, db_pass))
-      print ("Successfully connected to Postgres")
-      
-      return conn 
-
-   except Exception as e:
-      print ("error connecting to the DB")
-      print (e)
-
-def create_postgres_table():
-    try: 
-       conn = connect_postgres()
-
-    except Exception as e:
-       print ("error connecting to postgres")  
-       print (str(e)) 
-
-    try:
-       cursor = conn.cursor()
-       sqlCreateTable = "CREATE TABLE IF NOT EXISTS public.votes (id VARCHAR(255) NOT NULL, vote VARCHAR(255) NOT NULL);"
-       cursor.execute(sqlCreateTable)
-       print ("votes table created") 
-       conn.commit()
-       cursor.close() 
-
-    except Exception as e:
-       print ("error creating database table")
-       print (e)
-
-    try:
-      conn.close()
-
-    except Exception as e:
-       print ("error closing connection to postgres")
-       print (str(e))
+    return g.redis
 
 
-def insert_postgres(data):
-    try:
-       conn = connect_postgres()
+@app.route("/", methods=['POST', 'GET'])
+def hello():
+    voter_id = request.cookies.get('voter_id')
+    if not voter_id:
+        voter_id = hex(random.getrandbits(64))[2:-1]
 
-    except Exception as e:
-       print ("error connecting to postgres")  
-       print (str(e)) 
+    vote = None
+
+    if request.method == 'POST':
+        redis = get_redis()
+        vote = request.form['vote']
+        data = json.dumps({'voter_id': voter_id, 'vote': vote})
+        redis.rpush('votes', data)
+        redis.ping
+
+    resp = make_response(render_template(
+        'index.html',
+        option_a=option_a,
+        option_b=option_b,
+        hostname=hostname,
+        vote=vote,
+        proc=proc,
+    ))
+    resp.set_cookie('voter_id', voter_id)
+    return resp
 
 
-    try:
-       cur = conn.cursor()
-       cur.execute("insert into votes values (%s, %s)",
-       (
-          data.get("voter_id"),
-          data.get("vote")
-       ))
-       conn.commit()
-       print ("row inserted into DB")
-       cur.close()
-
-    except Exception as e:
-       conn.rollback()
-       cur.close()
-       print ("error inserting into postgres")
-       print (str(e))
-
-    try:
-      conn.close()
-
-    except Exception as e:
-       print ("error closing connection to postgres")
-       print (str(e))
-
-def process_votes():
-    redis = get_redis()
-    redis.ping()  
-    while True: 
-       try:  
-          msg = redis.rpop("votes")
-          print(msg)
-          if (msg != None): 
-             print ("reading message from redis")
-             msg_dict = json.loads(msg)
-             insert_postgres(msg_dict) 
-          # will look like this
-          # {"vote": "a", "voter_id": "71f0caa7172a84eb"}
-          time.sleep(3)        
-   
-       except Exception as e:
-          print(e)
-
-if __name__ == '__main__':
-    create_postgres_table()
-    process_votes()
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=8080, debug=True, threaded=True)
