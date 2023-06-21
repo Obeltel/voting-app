@@ -8,8 +8,8 @@ import json
 
 # This is a comment
 
-option_a = os.getenv('OPTION_A', "Nodejs")
-option_b = os.getenv('OPTION_B', "Python")
+option_a = os.getenv('OPTION_A', "AIX")
+option_b = os.getenv('OPTION_B', "IBMi")
 hostname = socket.gethostname()
 proc = platform.processor()
 
